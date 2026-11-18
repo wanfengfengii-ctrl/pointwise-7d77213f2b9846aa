@@ -1,0 +1,9 @@
+{
+  "day_key": "river-north/2026-06-12",
+  "revision_label": "morning",
+  "rows": [[10, 20], [11, 22], [12, 24]],
+  "arrivals": [5, 3, 0, 4, 2],
+  "changed_value": {"slot": 3, "column": 0, "value": 14},
+  "expected_received": [[0, [10, 20]], [2, [12, 24]], [3, [14, 26]], [4, [14, 28]], [5, [15, 30]]],
+  "expected_report": {"status": "recovered", "rows": [[10, 20], [11, 22], [12, 24]], "bad_slots": [3], "binding_matches": true}
+}
