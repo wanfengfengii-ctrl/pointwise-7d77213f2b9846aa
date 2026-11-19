@@ -1,12 +1,17 @@
-from archive.bundle import open_bundle
+from archive.bundle import BundleError, FixedBundle, open_bundle
 from encoding.layout import SOURCE_SLOTS
 from review.candidates import fit_column
 from review.discrepancies import column_disagreements
+from review.joint import recover_joint
 from review.report import RecoveredReport, UnrecoverableReport, recovered_report, unrecoverable_report
+
+__all__ = ['recover', 'recover_joint']
 
 
 def recover(raw: bytes) -> RecoveredReport | UnrecoverableReport:
     bundle = open_bundle(raw)
+    if not isinstance(bundle, FixedBundle):
+        raise BundleError('ordinary recovery requires a V1 bundle')
     coordinates = bundle.layout.coordinates
     observed = {fragment.slot: fragment.values for fragment in bundle.fragments}
     if len(coordinates) - len(observed) > 1:

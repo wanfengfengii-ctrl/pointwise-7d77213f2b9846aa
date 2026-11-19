@@ -2,18 +2,79 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from archive.bundle import open_bundle
+from archive.bundle import JointBundle, open_bundle
 from archive.catalog import ArchiveCatalog
 from archive.export import export
-from archive.publication import seal
+from archive.publication import seal, seal_joint
 from encoding.encode import encode
 from encoding.payload import Fragment
 from receipt.intake import receive
 from receipt.ledger import ReceiptLedger
-from review.recovery import recover
+from review.recovery import recover, recover_joint
 from review.report import RecoveredReport
 from source.revisions import record
 from source.store import RevisionStore
+
+
+def _joint_sample() -> dict:
+    path = Path(__file__).resolve().parent / 'samples' / 'joint_evidence.json'
+    for case in json.loads(path.read_text(encoding='utf-8')):
+        if case['case'] == 'complement':
+            return case
+    raise AssertionError('complement sample is missing')
+
+
+def joint_demo(root: Path) -> dict:
+    case = _joint_sample()
+    store = RevisionStore(root / 'joint-source.sqlite3')
+    ledger = ReceiptLedger(root / 'joint-receipt.sqlite3')
+    catalog = ArchiveCatalog(root / 'joint-archive.sqlite3')
+    for database in (store, ledger, catalog):
+        database.initialize()
+
+    revision_id = record(store, 'river-north/2026-06-12', case['case'], case['rows'])
+    layout = encode(store, revision_id).layout
+    original_batch = receive(ledger, layout, (Fragment(*entry) for entry in case['original']))
+    original = seal(ledger, catalog, original_batch)
+    supplement_batch = receive(ledger, layout, (Fragment(*entry) for entry in case['supplement']))
+    joint = seal_joint(ledger, catalog, original.bundle_id, supplement_batch)
+
+    # Night shift: the mirror, source store and receipt ledger are gone; only the archive remains.
+    Path(store.path).unlink()
+    Path(ledger.path).unlink()
+    reopened = ArchiveCatalog(catalog.path)
+    reopened.initialize()
+    raw = export(reopened, joint.bundle_id)
+    bundle = open_bundle(raw)
+    report = recover_joint(raw)
+    if not isinstance(bundle, JointBundle) or report.status != 'recovered':
+        raise AssertionError(f'expected a recovered joint bundle, received {bundle!r} / {report.status}')
+    if report.bundle_id != joint.bundle_id or joint.bundle_id not in reopened.bundle_ids():
+        raise AssertionError('the joint receipt and the reopened archive disagree')
+
+    expected = case['expected']
+    actual = {
+        'status': report.status,
+        'rows': [list(row) for row in report.rows],
+        'bad_slots': list(report.bad_slots),
+        'disagreements': [[source, slot, list(values)] for source, slot, values in report.disagreements],
+    }
+    if actual != expected:
+        raise AssertionError(f'joint demo disagrees with the sample: {actual!r} != {expected!r}')
+    return {
+        'case_id': 'joint-complement',
+        'original_bundle_id': joint.original_bundle_id,
+        'supplement_batch_id': joint.supplement_batch_id,
+        'bundle_id': joint.bundle_id,
+        'joint_directories': {
+            'original': list(bundle.original_directory),
+            'supplement': list(bundle.supplement_directory),
+        },
+        'expected': expected,
+        'actual': actual,
+        'code_paths': ['archive/publication.py', 'archive/export.py', 'archive/bundle.py', 'review/joint.py'],
+        'oracle': 'Original slot 2 [12,24] supports 10+x and 20+2x; supplement slot 2 [13,24] is the only foreign value.',
+    }
 
 
 def main() -> None:
@@ -71,6 +132,8 @@ def main() -> None:
             'oracle': 'Use 10+x and 20+2x at the named slots, omit slot 1, and compare the real slot 3 edit with the two unaltered formulas.',
         }
         print('POINTWISE_SCENARIO ' + json.dumps(scenario, ensure_ascii=False, sort_keys=True, separators=(',', ':')))
+        joint_scenario = joint_demo(root)
+        print('POINTWISE_SCENARIO ' + json.dumps(joint_scenario, ensure_ascii=False, sort_keys=True, separators=(',', ':')))
 
 
 if __name__ == '__main__':
